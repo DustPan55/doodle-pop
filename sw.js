@@ -1,5 +1,5 @@
 // Offline support. Bump VERSION (./bump.sh) when shipping changes so phones pick them up.
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const CACHE = 'doodlepop-' + VERSION;
 const ASSETS = [
   './',
