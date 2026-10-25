@@ -172,7 +172,6 @@ function update(dt) {
 // ---------- Drawing (strokes) ----------
 
 const strokes = [];
-let stroke = null;
 let colorIndex = -1; // -1 = rainbow
 let rainbowNext = 0;
 
@@ -184,27 +183,25 @@ function startStroke(w) {
   } else {
     color = COLORS[colorIndex].hex;
   }
-  stroke = { color, width: (12 * unit) / view.scale, pts: [w], path: null };
-  strokes.push(stroke);
+  const s = { color, width: (12 * unit) / view.scale, pts: [w], path: null, born: nowSec() };
+  strokes.push(s);
   if (strokes.length > MAX_STROKES) strokes.shift();
+  return s;
 }
 
-function addPoint(w) {
-  const last = stroke.pts[stroke.pts.length - 1];
+function addPoint(s, w) {
+  const last = s.pts[s.pts.length - 1];
   if (Math.hypot(w.x - last.x, w.y - last.y) < 1.5 / view.scale) return;
-  stroke.pts.push(w);
+  s.pts.push(w);
 }
 
-function finishStroke() {
-  if (!stroke) return;
-  stroke.path = strokePath(stroke.pts);
-  stroke = null;
+function finishStroke(s) {
+  if (s) s.path = strokePath(s.pts);
 }
 
-function discardStroke() {
-  const i = strokes.indexOf(stroke);
+function discardStroke(s) {
+  const i = strokes.indexOf(s);
   if (i >= 0) strokes.splice(i, 1);
-  stroke = null;
 }
 
 function strokePath(pts) {
@@ -224,30 +221,38 @@ function strokePath(pts) {
 }
 
 // ---------- Input ----------
-// 1 finger: draw (or pop a shape it lands on). 2 fingers: pinch to zoom and pan.
-// After a pinch, nothing happens until every finger lifts, so no stray lines.
+// Every finger is tracked on its own, because little hands rest a thumb on the screen.
+//  - A finger that lands on a shape pops it, however many other fingers are down.
+//  - Other fingers start 'pending'. A pending finger that moves becomes a drawing finger.
+//    One that sits still (a resting thumb) is ignored and leaves no mark, and after
+//    REST_TIME it has to move REST_SLOP px before it starts drawing.
+//  - Pinch-zoom only kicks in when two fingers start moving at about the same time.
+//    A still thumb plus a moving finger draws.
 
-const pointers = new Map();
-let mode = 'idle'; // idle | draw | tap | pinch | wait
-let activeId = null;
+const REST_TIME = 0.35; // s
+const MOVE_SLOP = 6;
+const REST_SLOP = 30;
+const PINCH_WINDOW = 0.3; // s: how close together two fingers must start moving to be a pinch
+
+const pointers = new Map(); // id -> { x, y, sx, sy, down, role, stroke, movedAt }
 let pinch = null;
 
-function startPinch() {
-  const ids = [...pointers.keys()].slice(0, 2);
-  const [a, b] = ids.map((id) => pointers.get(id));
+function startPinch(a, b) {
+  for (const p of [a, b]) {
+    if (p.stroke) discardStroke(p.stroke);
+    p.stroke = null;
+    p.role = 'pinch';
+  }
   pinch = {
-    ids,
+    a, b,
     d0: Math.max(dist(a, b), 1),
     world: toWorld(mid(a, b).x, mid(a, b).y),
     scale0: view.scale,
   };
-  mode = 'pinch';
 }
 
 function updatePinch() {
-  const a = pointers.get(pinch.ids[0]);
-  const b = pointers.get(pinch.ids[1]);
-  if (!a || !b) return;
+  const { a, b } = pinch;
   const m = mid(a, b);
   view.scale = clamp((pinch.scale0 * dist(a, b)) / pinch.d0, MIN_ZOOM, MAX_ZOOM);
   view.x = m.x - pinch.world.x * view.scale;
@@ -255,29 +260,27 @@ function updatePinch() {
   clampView();
 }
 
+// Another finger that just started moving too, so the two of them make a pinch.
+function pinchPartner(p, t) {
+  if (pinch) return null;
+  for (const q of pointers.values()) {
+    if (q === p) continue;
+    if (q.role === 'draw' && t - q.movedAt < PINCH_WINDOW && q.stroke.pts.length < 12) return q;
+    if (q.role === 'pending' && Math.hypot(q.x - q.sx, q.y - q.sy) > MOVE_SLOP / 2 && t - q.down < REST_TIME) return q;
+  }
+  return null;
+}
+
 canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-  if (pointers.size === 1) {
-    activeId = e.pointerId;
-    const w = toWorld(e.clientX, e.clientY);
-    const hit = hitShape(w);
-    if (hit) {
-      popShape(hit);
-      mode = 'tap';
-    } else {
-      startStroke(w);
-      mode = 'draw';
-    }
-  } else if (pointers.size === 2) {
-    // Second finger: the first finger's short stroke was really the start of a pinch.
-    if (stroke) {
-      if (stroke.pts.length < 6) discardStroke();
-      else finishStroke();
-    }
-    startPinch();
+  const t = nowSec();
+  const p = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, down: t, role: 'pending', stroke: null, movedAt: 0 };
+  pointers.set(e.pointerId, p);
+  const hit = hitShape(toWorld(e.clientX, e.clientY));
+  if (hit) {
+    popShape(hit);
+    p.role = 'tap';
   }
 });
 
@@ -286,38 +289,54 @@ canvas.addEventListener('pointermove', (e) => {
   if (!p) return;
   p.x = e.clientX;
   p.y = e.clientY;
+  const t = nowSec();
 
-  if (mode === 'pinch') {
+  if (p.role === 'pinch') {
     updatePinch();
     return;
   }
-  if (e.pointerId !== activeId || (mode !== 'draw' && mode !== 'tap')) return;
 
+  if (p.role === 'pending') {
+    const slop = t - p.down < REST_TIME ? MOVE_SLOP : REST_SLOP;
+    if (Math.hypot(p.x - p.sx, p.y - p.sy) < slop) return; // still resting
+    const partner = pinchPartner(p, t);
+    if (partner) {
+      startPinch(partner, p);
+      updatePinch();
+      return;
+    }
+    p.role = 'draw';
+    p.movedAt = t;
+    p.stroke = startStroke(toWorld(p.sx, p.sy));
+  }
+
+  if (p.role !== 'draw' && p.role !== 'tap') return;
   const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
   const events = coalesced.length ? coalesced : [e];
   for (const ev of events) {
     const w = toWorld(ev.clientX, ev.clientY);
-    if (mode === 'draw' && stroke) addPoint(w);
+    if (p.stroke) addPoint(p.stroke, w);
     const hit = hitShape(w); // dragging across a shape pops it too
     if (hit) popShape(hit);
   }
 });
 
 function onPointerEnd(e) {
-  if (!pointers.has(e.pointerId)) return;
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
   pointers.delete(e.pointerId);
-  if (mode === 'draw' && e.pointerId === activeId) {
-    finishStroke();
-    mode = 'wait';
-  } else if (mode === 'tap' && e.pointerId === activeId) {
-    mode = 'wait';
-  } else if (mode === 'pinch' && pinch.ids.includes(e.pointerId)) {
+  if (p.role === 'draw') {
+    finishStroke(p.stroke);
+  } else if (p.role === 'pending' && e.type === 'pointerup' && nowSec() - p.down < REST_TIME) {
+    finishStroke(startStroke(toWorld(p.sx, p.sy))); // a quick tap leaves a dot
+  } else if (p.role === 'pinch' && pinch) {
+    // The other pinch finger goes back to resting, so lifting one finger doesn't draw a stray line.
+    const other = pinch.a === p ? pinch.b : pinch.a;
+    other.role = 'pending';
+    other.sx = other.x;
+    other.sy = other.y;
+    other.down = -Infinity;
     pinch = null;
-    mode = 'wait';
-  }
-  if (pointers.size === 0) {
-    mode = 'idle';
-    activeId = null;
   }
 }
 canvas.addEventListener('pointerup', onPointerEnd);
@@ -636,7 +655,10 @@ function openParent() {
 
 $('optSound').addEventListener('change', (e) => { settings.sound = e.target.checked; saveSettings(); });
 $('optVoice').addEventListener('change', (e) => { settings.voice = e.target.checked; saveSettings(); });
-$('clear').addEventListener('click', () => { strokes.length = 0; stroke = null; });
+$('clear').addEventListener('click', () => {
+  strokes.length = 0;
+  for (const p of pointers.values()) p.stroke = null;
+});
 $('resetZoom').addEventListener('click', () => { view.scale = 1; view.x = 0; view.y = 0; });
 $('resume').addEventListener('click', () => { initAudio(); parentEl.hidden = true; });
 

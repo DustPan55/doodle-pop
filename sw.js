@@ -1,5 +1,5 @@
 // Offline support. Bump CACHE when shipping changes so phones pick them up.
-const CACHE = 'doodlepop-v1';
+const CACHE = 'doodlepop-v2';
 const ASSETS = [
   './',
   './index.html',
