@@ -2,6 +2,8 @@
 
 // ---------- Config ----------
 
+const APP_VERSION = '1.2.0'; // keep in step with sw.js; ./bump.sh does both
+
 const COLORS = [
   { name: 'red', hex: '#FF4D4D', dark: '#C92A2A' },
   { name: 'orange', hex: '#FF9F1C', dark: '#C76F00' },
@@ -18,11 +20,16 @@ const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
 const MAX_STROKES = 400;
 const HOLD_MS = 1500;
-const BG = '#FFF8EC';
+// Canvas colors per theme. The CSS side of each theme lives in style.css.
+const THEMES = {
+  light: { bg: '#FFF8EC', grid: 'rgba(43,36,64,0.07)' },
+  dark: { bg: '#17142A', grid: 'rgba(255,255,255,0.08)' },
+};
+let theme = THEMES.light;
 
 // ---------- Settings (per device) ----------
 
-const DEFAULTS = { sound: true, voice: true, seenIntro: false };
+const DEFAULTS = { sound: true, voice: true, seenIntro: false, theme: 'auto', totalPops: 0 };
 const settings = loadSettings();
 
 function loadSettings() {
@@ -122,6 +129,7 @@ function popShape(s) {
   burst(s);
   playPop(SHAPES.indexOf(s.type));
   say(`${s.color.name} ${s.type}`);
+  countPop();
   setTimeout(() => shapes.push(makeShape()), 700);
 }
 
@@ -474,7 +482,7 @@ function drawGrid() {
   const y0 = Math.floor(-view.y / view.scale / step) * step;
   const x1 = (W - view.x) / view.scale;
   const y1 = (H - view.y) / view.scale;
-  ctx.fillStyle = 'rgba(43,36,64,0.07)';
+  ctx.fillStyle = theme.grid;
   ctx.beginPath();
   for (let x = x0; x <= x1; x += step) {
     for (let y = y0; y <= y1; y += step) {
@@ -525,7 +533,7 @@ function frame() {
   update(dt);
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.fillStyle = BG;
+  ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, W, H);
   ctx.setTransform(DPR * view.scale, 0, 0, DPR * view.scale, DPR * view.x, DPR * view.y);
   drawGrid();
@@ -650,11 +658,55 @@ function openParent() {
   hold.classList.remove('holding');
   $('optSound').checked = settings.sound;
   $('optVoice').checked = settings.voice;
+  $('totalPops').textContent = settings.totalPops.toLocaleString();
   parentEl.hidden = false;
 }
 
 $('optSound').addEventListener('change', (e) => { settings.sound = e.target.checked; saveSettings(); });
 $('optVoice').addEventListener('change', (e) => { settings.voice = e.target.checked; saveSettings(); });
+$('version').textContent = 'Version ' + APP_VERSION;
+
+// Theme: follow the phone's setting ('auto'), or force light/dark.
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+
+function applyTheme() {
+  const name = settings.theme === 'auto' ? (darkQuery.matches ? 'dark' : 'light') : settings.theme;
+  theme = THEMES[name];
+  document.documentElement.dataset.theme = name;
+  document.querySelector('meta[name="theme-color"]').content = theme.bg;
+  for (const b of document.querySelectorAll('#optTheme button')) {
+    b.classList.toggle('on', b.dataset.theme === settings.theme);
+  }
+}
+
+darkQuery.addEventListener('change', applyTheme);
+for (const b of document.querySelectorAll('#optTheme button')) {
+  b.addEventListener('click', () => {
+    settings.theme = b.dataset.theme;
+    saveSettings();
+    applyTheme();
+  });
+}
+applyTheme();
+
+// Pop counter: on screen it counts this visit; the grown-up menu shows the all-time total.
+const counterEl = $('counter');
+let sessionPops = 0;
+
+function countPop() {
+  sessionPops++;
+  settings.totalPops++;
+  saveSettings();
+  $('popCount').textContent = sessionPops;
+  counterEl.classList.remove('bump');
+  void counterEl.offsetWidth; // restart the bump animation
+  counterEl.classList.add('bump');
+}
+
+$('resetCount').addEventListener('click', () => {
+  sessionPops = 0;
+  $('popCount').textContent = 0;
+});
 $('clear').addEventListener('click', () => {
   strokes.length = 0;
   for (const p of pointers.values()) p.stroke = null;

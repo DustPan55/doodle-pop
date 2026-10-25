@@ -20,6 +20,11 @@
 
   <div id="palette" aria-label="Colors"></div>
 
+  <div id="counter" aria-live="polite">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.8-4.9 4.5 1.3 6.5L12 17l-5.9 3.3 1.3-6.5-4.9-4.5 6.6-.8z"/></svg>
+    <span id="popCount">0</span>
+  </div>
+
   <!-- Grown-up menu: press and hold so a tap from a kid doesn't open it -->
   <button id="hold" aria-label="Grown-ups: press and hold">
     <svg viewBox="0 0 44 44" aria-hidden="true">
@@ -48,9 +53,19 @@
       <h2>Grown-ups</h2>
       <label class="row"><span>Sounds</span><input type="checkbox" id="optSound"></label>
       <label class="row"><span>Say shape names</span><input type="checkbox" id="optVoice"></label>
+      <div class="row">
+        <span>Theme</span>
+        <div id="optTheme" class="segmented" role="group" aria-label="Theme">
+          <button data-theme="auto">Auto</button>
+          <button data-theme="light">Light</button>
+          <button data-theme="dark">Dark</button>
+        </div>
+      </div>
+      <div class="row"><span>Shapes popped, all time</span><b id="totalPops">0</b></div>
       <div class="buttons">
         <button id="clear">Clear drawing</button>
         <button id="resetZoom">Reset zoom</button>
+        <button id="resetCount">Reset counter</button>
       </div>
       <p class="tip">No sound? Check that the silent switch is off.</p>
       <details>
@@ -58,6 +73,7 @@
         <div class="lockHelp"></div>
       </details>
       <button id="resume" class="big">Back to playing</button>
+      <p id="version" class="tip version"></p>
     </div>
   </section>
 

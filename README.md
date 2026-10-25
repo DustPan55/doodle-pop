@@ -17,5 +17,6 @@ The app's start screen walks parents through this.
 
 No build step. Run `python3 -m http.server` in this folder and open http://localhost:8000.
 
-Pushing to `main` deploys to GitHub Pages. **Bump `CACHE` in `sw.js`** whenever you change a file;
-otherwise phones that already installed the app keep the old cached copy.
+Pushing to `main` deploys to GitHub Pages. **Run `./bump.sh <version>`** (e.g. `./bump.sh 1.3.0`) whenever you change a file;
+it sets the version shown in the grown-up menu and the offline cache name. Without it,
+phones that already installed the app keep the old cached copy.

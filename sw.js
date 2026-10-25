@@ -1,5 +1,6 @@
-// Offline support. Bump CACHE when shipping changes so phones pick them up.
-const CACHE = 'doodlepop-v2';
+// Offline support. Bump VERSION (./bump.sh) when shipping changes so phones pick them up.
+const VERSION = '1.2.0';
+const CACHE = 'doodlepop-' + VERSION;
 const ASSETS = [
   './',
   './index.html',
